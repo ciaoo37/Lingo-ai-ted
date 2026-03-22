@@ -1,31 +1,25 @@
 import streamlit as st
-import pandas as pd
-import json
-import os
-import random
-from google import genai
-from google.genai import types
 
-st.set_page_config(page_title="LingoAI - Tedesco", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Lingo AI", layout="wide")
 
-DATA_FILE = "flashcards.json"
-
-def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
-
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4)
-
-if 'flashcards' not in st.session_state:
-    st.session_state.flashcards = load_data()
-
+# Barra laterale
 st.sidebar.title("⚙️ Impostazioni")
-api_key = st.sidebar.text_input("Inserisci la tua Google Gemini API Key", type="password")
+api_key = st.sidebar.text_input("Inserisci API Key", type="password")
 
-menu = st.sidebar.radio("Menu", ["📚 Dashboard & Gestione", "✨ Genera con AI", "📖 Smart Reader", "🧠 Modalità Studio"])
+menu = st.sidebar.radio("Menu", ["🏠 Home", "✨ Genera", "📚 Reader", "🧠 Studio"])
 
-# ... rest of the code
+# Parte centrale (quella che ora vedi nera)
+if menu == "🏠 Home":
+    st.title("Benvenuto in Lingo AI! 🇩🇪🇮🇹")
+    st.write("Se vedi questa scritta, l'app funziona correttamente!")
+    st.info("Inizia cliccando su 'Genera' per creare le tue prime flashcard.")
+
+elif menu == "✨ Genera":
+    st.title("✨ Genera Nuove Flashcard")
+    parole = st.text_area("Scrivi qui le parole (es: Hund, laufen)")
+    if st.button("Genera"):
+        st.success(f"Hai scritto: {parole}. (Qui l'AI creerà le card appena metti l'API Key)")
+
+else:
+    st.title(f"Sezione {menu}")
+    st.write("Questa parte è pronta per essere popolata con i tuoi dati!")
