@@ -116,6 +116,7 @@ st.markdown("""
     .crud-row {
         padding: 0.5rem 0;
         border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+        align-items: center;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -185,7 +186,7 @@ if menu == "📊 Dashboard & Database":
     else:
         st.write("Seleziona le card da studiare, modificale o eliminale singolarmente.")
         
-        # Se stiamo modificando una card, mostriamo il form di modifica
+        # Form di Modifica (se una card è in fase di editing)
         if st.session_state.editing_card_id:
             card_idx = next((i for i, c in enumerate(st.session_state.flashcards) if c['id'] == st.session_state.editing_card_id), -1)
             if card_idx != -1:
@@ -211,9 +212,12 @@ if menu == "📊 Dashboard & Database":
                     if col_cancel.form_submit_button("❌ Annulla"):
                         st.session_state.editing_card_id = None
                         st.rerun()
-            st.markdown("---")
+                st.markdown("---")
 
-        # Intestazione Tabella
+        # Tabella Custom (Mobile Friendly)
+        st.markdown("#### Le tue Flashcard")
+        
+        # Intestazione
         col_chk, col_word, col_edit, col_del = st.columns([1, 5, 1.5, 1.5])
         col_chk.write("**Studia**")
         col_word.write("**Termine**")
@@ -221,11 +225,11 @@ if menu == "📊 Dashboard & Database":
         col_del.write("**Elimina**")
         st.markdown("<hr style='margin: 0;'>", unsafe_allow_html=True)
         
-        # Righe Tabella
+        # Righe
         for i, card in enumerate(st.session_state.flashcards):
             c1, c2, c3, c4 = st.columns([1, 5, 1.5, 1.5])
             
-            # Checkbox per selezionare
+            # Checkbox
             is_selected = c1.checkbox("", value=card.get('selected', False), key=f"chk_{card['id']}")
             if is_selected != card.get('selected', False):
                 st.session_state.flashcards[i]['selected'] = is_selected
@@ -319,7 +323,7 @@ elif menu == "📖 Smart Reader":
         
         col1, col2 = st.columns([1, 2])
         level = col1.selectbox("Difficoltà", ["A1", "A2", "B1", "B2"])
-        topic = col2.text_input("Tema (es: 'un dialogo al ristorante')", placeholder="Di cosa vuoi parlare?")
+        topic = col2.text_input("Tema (es: 'Scrivi una storia di fantascienza')", placeholder="Di cosa vuoi parlare?")
         
         if st.button("📚 Genera Testo"):
             if not topic.strip():
@@ -488,7 +492,7 @@ elif menu == "🧠 Modalità Studio":
             st.markdown("---")
             
             if sbagliate > 0:
-                if st.button("🔄 Ripeti solo errori"):
+                if st.button(f"🔄 Ripeti solo i {sbagliate} errori"):
                     st.session_state.study_queue = st.session_state.session_errors.copy()
                     random.shuffle(st.session_state.study_queue)
                     st.session_state.study_idx = 0
@@ -497,6 +501,6 @@ elif menu == "🧠 Modalità Studio":
                     st.session_state.study_phase = "active"
                     st.rerun()
             
-            if st.button("🏠 Esci e torna alla Dashboard"):
+            if st.button("🏠 Torna alla Home"):
                 st.session_state.study_phase = "setup"
                 st.rerun()
