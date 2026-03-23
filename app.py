@@ -3,15 +3,15 @@ import pandas as pd
 import json
 import os
 import random
+import uuid
 import google.generativeai as genai
 
 # --- CONFIGURAZIONE PAGINA ---
 st.set_page_config(page_title="LingoAI - Tedesco", page_icon="🇩🇪", layout="centered")
 
-# --- CUSTOM CSS (Design Moderno, Mobile First, Colori Personalizzati) ---
+# --- CUSTOM CSS (Design Moderno, Mobile First) ---
 st.markdown("""
 <style>
-    /* Font Sans Serif elegante e sfondo grigio chiaro per far risaltare le card bianche */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
     
     html, body, [class*="css"] {
@@ -19,7 +19,7 @@ st.markdown("""
     }
     
     .stApp {
-        background-color: #f3f4f6; /* Grigio chiarissimo */
+        background-color: #f3f4f6;
     }
 
     /* Stile della Flashcard Bianca */
@@ -38,15 +38,15 @@ st.markdown("""
         font-size: 0.85rem;
         text-transform: uppercase;
         letter-spacing: 2px;
-        color: #dc2626; /* Rosso bandiera tedesca */
+        color: #dc2626;
         font-weight: 800;
         margin-bottom: 1rem;
     }
     
     .fc-german {
-        font-size: 3rem;
+        font-size: 2.8rem;
         font-weight: 800;
-        color: #000000; /* Nero bandiera tedesca */
+        color: #000000;
         line-height: 1.1;
         margin-bottom: 0.5rem;
     }
@@ -68,7 +68,7 @@ st.markdown("""
         font-size: 1.1rem;
         color: #374151;
         font-style: italic;
-        border-left: 4px solid #dc2626; /* Dettaglio rosso */
+        border-left: 4px solid #dc2626;
     }
 
     /* Stile Bottoni Grandi e Colorati */
@@ -76,7 +76,7 @@ st.markdown("""
         border-radius: 20px;
         font-weight: 800;
         height: 4rem;
-        font-size: 1.2rem;
+        font-size: 1.1rem;
         width: 100%;
         transition: transform 0.1s;
     }
@@ -85,25 +85,26 @@ st.markdown("""
         transform: scale(0.95);
     }
 
-    /* Colora i bottoni in base all'emoji che contengono! */
-    button:has(p:contains("✅")) {
-        background-color: #10b981 !important; /* Verde smeraldo */
+    /* Colora i bottoni in base al testo */
+    button:has(p:contains("✅ Sì, la so")) {
+        background-color: #10b981 !important;
         color: white !important;
         border: none !important;
         box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4) !important;
     }
     
-    button:has(p:contains("❌")) {
-        background-color: #ef4444 !important; /* Rosso acceso */
+    button:has(p:contains("❌ No, non la so")) {
+        background-color: #ef4444 !important;
         color: white !important;
         border: none !important;
         box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4) !important;
     }
     
-    button:has(p:contains("🔄")) {
-        background-color: #1f2937 !important; /* Grigio scuro/Nero */
+    button:has(p:contains("🔄 Gira la carta")) {
+        background-color: #2563eb !important; /* Blu moderno */
         color: white !important;
         border: none !important;
+        box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4) !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -115,85 +116,105 @@ def load_data():
     if not os.path.exists(DATA_FILE):
         return []
     try:
-        # Legge il CSV e sostituisce i valori vuoti (NaN) con stringhe vuote
         df = pd.read_csv(DATA_FILE)
         df = df.fillna("")
-        return df.to_dict('records')
+        records = df.to_dict('records')
+        # Assicuriamoci che ogni card abbia un ID univoco
+        for r in records:
+            if 'id' not in r or not r['id']:
+                r['id'] = str(uuid.uuid4())
+        return records
     except Exception as e:
-        st.sidebar.error(f"Errore nella lettura del CSV: {e}")
+        st.sidebar.error(f"Errore lettura CSV: {e}")
         return []
 
 def save_data(data):
     try:
         if not data:
-            # Se la lista è vuota, crea un CSV vuoto
-            pd.DataFrame().to_csv(DATA_FILE, index=False)
+            pd.DataFrame(columns=['id', 'category', 'german', 'italian', 'article', 'plural', 'exampleSentenceGerman', 'exampleSentenceItalian', 'correctCount', 'incorrectCount']).to_csv(DATA_FILE, index=False)
         else:
-            # Salva la lista di dizionari in CSV
             pd.DataFrame(data).to_csv(DATA_FILE, index=False)
     except Exception as e:
-        st.error(f"Impossibile salvare i dati nel CSV: {e}")
+        st.error(f"Errore salvataggio CSV: {e}")
 
-# Inizializza i dati
+# Inizializzazione Session State
 if 'flashcards' not in st.session_state:
     st.session_state.flashcards = load_data()
-
+if 'study_mode' not in st.session_state:
+    st.session_state.study_mode = "setup" # setup, studying, summary
 if 'card_flipped' not in st.session_state:
     st.session_state.card_flipped = False
 
 # --- BARRA LATERALE ---
 with st.sidebar:
     st.title("⚙️ Impostazioni")
-    api_key = st.text_input("🔑 Inserisci API Key", type="password", help="La tua chiave di Google Gemini")
+    api_key = st.text_input("🔑 API Key Gemini", type="password")
     
     st.markdown("---")
     menu = st.radio(
         "📍 Navigazione", 
-        ["📊 Dashboard", "✨ Genera Flashcard", "📖 Smart Reader", "🧠 Modalità Studio"]
+        ["📊 Dashboard & Gestione", "✨ Genera Flashcard", "🧠 Modalità Studio"]
     )
 
 if api_key:
     genai.configure(api_key=api_key)
 
-# --- VISTA: DASHBOARD ---
-if menu == "📊 Dashboard":
-    st.title("📊 Dashboard")
+# --- VISTA: DASHBOARD & GESTIONE (CRUD) ---
+if menu == "📊 Dashboard & Gestione":
+    st.title("📊 Dashboard & Gestione")
     
-    if st.session_state.flashcards:
-        tot_cards = len(st.session_state.flashcards)
-        st.success(f"Hai **{tot_cards}** flashcard nel tuo database CSV.")
-        
-        st.markdown("### 📋 Le tue Parole (Mobile Friendly)")
-        # Invece di una tabella, usiamo degli "expander" perfetti per il cellulare
-        for i, card in enumerate(reversed(st.session_state.flashcards)):
-            if i >= 15: # Mostra solo le ultime 15 per non appesantire il telefono
-                st.write("*...e altre ancora!*")
-                break
-                
-            titolo = f"{card.get('article', '')} {card.get('german', '')} ➔ {card.get('italian', '')}"
-            with st.expander(titolo):
-                st.write(f"**Categoria:** {card.get('category', '')}")
-                st.write(f"**Plurale:** {card.get('plural', '-')}")
-                st.write(f"**Risposte Esatte:** ✅ {card.get('correctCount', 0)}")
-                st.write(f"**Errori:** ❌ {card.get('incorrectCount', 0)}")
-        
-        st.markdown("---")
-        if st.button("🗑️ Elimina tutte le flashcard"):
-            st.session_state.flashcards = []
-            save_data([])
-            st.rerun()
+    if not st.session_state.flashcards:
+        st.info("Non hai ancora flashcard. Vai su 'Genera Flashcard' per iniziare.")
     else:
-        st.info("👋 Benvenuto! Non hai ancora flashcard. Vai su 'Genera Flashcard' per iniziare.")
+        st.success(f"Hai **{len(st.session_state.flashcards)}** flashcard nel database.")
+        
+        st.markdown("### ✏️ Modifica o Elimina")
+        # Creiamo un dizionario per la selectbox
+        card_options = {c['id']: f"{c.get('article', '')} {c['german']} ➔ {c['italian']}" for c in st.session_state.flashcards}
+        
+        selected_id = st.selectbox("Seleziona una flashcard da gestire:", options=list(card_options.keys()), format_func=lambda x: card_options[x])
+        
+        if selected_id:
+            # Trova la card
+            card_idx = next((index for (index, d) in enumerate(st.session_state.flashcards) if d["id"] == selected_id), None)
+            card = st.session_state.flashcards[card_idx]
+            
+            with st.expander("Modifica i dettagli della card", expanded=True):
+                with st.form(f"edit_form_{selected_id}"):
+                    new_ger = st.text_input("Tedesco", value=card.get('german', ''))
+                    new_ita = st.text_input("Italiano", value=card.get('italian', ''))
+                    new_cat = st.text_input("Categoria", value=card.get('category', ''))
+                    new_ex_de = st.text_area("Esempio (Tedesco)", value=card.get('exampleSentenceGerman', ''))
+                    new_ex_it = st.text_area("Esempio (Italiano)", value=card.get('exampleSentenceItalian', ''))
+                    
+                    col_save, col_del = st.columns(2)
+                    submit_save = col_save.form_submit_button("💾 Salva Modifiche")
+                    submit_del = col_del.form_submit_button("🗑️ Elimina Card")
+                    
+                    if submit_save:
+                        st.session_state.flashcards[card_idx].update({
+                            'german': new_ger, 'italian': new_ita, 'category': new_cat,
+                            'exampleSentenceGerman': new_ex_de, 'exampleSentenceItalian': new_ex_it
+                        })
+                        save_data(st.session_state.flashcards)
+                        st.success("Modifiche salvate!")
+                        st.rerun()
+                        
+                    if submit_del:
+                        st.session_state.flashcards.pop(card_idx)
+                        save_data(st.session_state.flashcards)
+                        st.warning("Card eliminata!")
+                        st.rerun()
 
 # --- VISTA: GENERA CON AI ---
 elif menu == "✨ Genera Flashcard":
     st.title("✨ Genera con AI")
     
     if not api_key:
-        st.warning("⚠️ Per favore, inserisci la tua API Key nella barra laterale per iniziare.")
+        st.warning("⚠️ Inserisci la tua API Key nella barra laterale per iniziare.")
     else:
-        st.write("Incolla una lista di parole. L'AI troverà articoli, plurali e creerà frasi d'esempio.")
-        words_input = st.text_area("Lista parole (una per riga):", height=150, placeholder="Es:\nHund\nKatze\nlaufen")
+        st.write("Incolla una lista di parole. L'AI creerà card complete di frasi d'esempio naturali.")
+        words_input = st.text_area("Lista parole (una per riga):", height=150)
         
         if st.button("🚀 Genera Flashcard"):
             if not words_input.strip():
@@ -201,23 +222,24 @@ elif menu == "✨ Genera Flashcard":
             else:
                 with st.spinner("L'AI sta creando le tue card..."):
                     try:
-                        # Usiamo il NUOVO modello aggiornato
-                        model = genai.GenerativeModel('gemini-2.5-flash')
+                        # Modello aggiornato come richiesto
+                        model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
                         prompt = f"""
                         Genera flashcard in italiano e tedesco per queste parole:
                         {words_input}
                         
+                        Devi includere obbligatoriamente: Termine, Traduzione, Categoria e una Frase d'esempio naturale.
                         Restituisci ESATTAMENTE un array JSON valido.
                         Struttura per ogni parola:
                         {{
-                            "category": "Sostantivi",
+                            "id": "",
+                            "category": "Sostantivi, Verbi, ecc.",
                             "german": "parola in tedesco",
                             "italian": "traduzione in italiano",
                             "article": "articolo determinativo se è un sostantivo, altrimenti vuoto",
                             "plural": "forma plurale se è un sostantivo, altrimenti vuoto",
-                            "exampleSentenceGerman": "frase di esempio in tedesco",
-                            "exampleSentenceItalian": "traduzione della frase in italiano",
-                            "cloze": "la frase in tedesco con la parola bersaglio sostituita da '___'"
+                            "exampleSentenceGerman": "frase di esempio naturale in tedesco",
+                            "exampleSentenceItalian": "traduzione della frase in italiano"
                         }}
                         """
                         response = model.generate_content(
@@ -225,7 +247,6 @@ elif menu == "✨ Genera Flashcard":
                             generation_config=genai.GenerationConfig(response_mime_type="application/json")
                         )
                         
-                        # Pulizia del testo nel caso Gemini aggiunga i backtick del markdown
                         testo_json = response.text.strip()
                         if testo_json.startswith("```json"):
                             testo_json = testo_json[7:-3]
@@ -233,132 +254,155 @@ elif menu == "✨ Genera Flashcard":
                         new_cards = json.loads(testo_json.strip())
                         
                         for card in new_cards:
+                            card['id'] = str(uuid.uuid4())
                             card['correctCount'] = 0
                             card['incorrectCount'] = 0
                             
                         st.session_state.flashcards.extend(new_cards)
-                        save_data(st.session_state.flashcards) # Salva nel CSV!
-                        st.success(f"🎉 {len(new_cards)} flashcard aggiunte al tuo mazzo!")
+                        save_data(st.session_state.flashcards)
+                        st.success(f"🎉 {len(new_cards)} flashcard aggiunte!")
                     except Exception as e:
                         st.error(f"Errore durante la generazione: {e}")
-
-# --- VISTA: SMART READER ---
-elif menu == "📖 Smart Reader":
-    st.title("📖 Smart Reader")
-    
-    if not api_key:
-        st.warning("⚠️ Per favore, inserisci la tua API Key nella barra laterale per iniziare.")
-    elif not st.session_state.flashcards:
-        st.info("Devi prima salvare qualche flashcard per generare un testo personalizzato.")
-    else:
-        level = st.selectbox("Scegli il livello", ["A1", "A2", "B1", "B2"])
-        
-        if st.button("📚 Scrivi una storia per me"):
-            with st.spinner("L'AI sta scrivendo..."):
-                try:
-                    words = [c.get('german', '') for c in st.session_state.flashcards if 'german' in c]
-                    random.shuffle(words)
-                    selected_words = words[:15]
-                    
-                    model = genai.GenerativeModel('gemini-2.5-flash')
-                    prompt = f"Scrivi un breve testo in tedesco (livello {level}) che includa il più possibile queste parole: {', '.join(selected_words)}. Restituisci SOLO il testo in tedesco, formattato in paragrafi."
-                    
-                    response = model.generate_content(prompt)
-                    
-                    st.markdown(f"""
-                    <div style="background: white; padding: 20px; border-radius: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); font-size: 1.2rem; line-height: 1.6;">
-                        {response.text}
-                    </div>
-                    """, unsafe_allow_html=True)
-                except Exception as e:
-                    st.error(f"Errore: {e}")
 
 # --- VISTA: MODALITÀ STUDIO ---
 elif menu == "🧠 Modalità Studio":
     st.title("🧠 Modalità Studio")
     
     if not st.session_state.flashcards:
-        st.info("Aggiungi prima delle flashcard nella sezione 'Genera Flashcard'!")
+        st.info("Aggiungi prima delle flashcard!")
     else:
-        if 'study_index' not in st.session_state:
-            st.session_state.study_index = 0
-            st.session_state.card_flipped = False
-            sorted_cards = sorted(st.session_state.flashcards, key=lambda x: int(x.get('incorrectCount', 0)), reverse=True)
-            st.session_state.study_cards = sorted_cards[:20]
-        
-        if st.session_state.study_index < len(st.session_state.study_cards):
-            card = st.session_state.study_cards[st.session_state.study_index]
+        # FASE 1: SETUP DELLA SESSIONE
+        if st.session_state.study_mode == "setup":
+            st.markdown("### Scegli come vuoi studiare oggi:")
             
-            st.caption(f"Carta {st.session_state.study_index + 1} di {len(st.session_state.study_cards)}")
+            tab1, tab2 = st.tabs(["🎯 Smart Random", "✅ Selezione Manuale"])
             
-            category = card.get('category', 'Generale')
-            article = card.get('article', '')
-            german = card.get('german', '')
-            italian = card.get('italian', '')
-            plural = card.get('plural', '')
-            ex_de = card.get('exampleSentenceGerman', '')
-            ex_it = card.get('exampleSentenceItalian', '')
-            
-            if not st.session_state.card_flipped:
-                # FRONTE
-                card_html = f"""
-                <div class="flashcard">
-                    <div class="fc-category">{category}</div>
-                    <div class="fc-german">{article} {german}</div>
-                </div>
-                """
-                st.markdown(card_html, unsafe_allow_html=True)
+            with tab1:
+                st.write("L'algoritmo pescherà le parole dando priorità a quelle che sbagli più spesso.")
+                num_cards = st.slider("Quante parole vuoi ripassare?", min_value=1, max_value=len(st.session_state.flashcards), value=min(10, len(st.session_state.flashcards)))
                 
-                if st.button("🔄 Gira la carta"):
-                    st.session_state.card_flipped = True
+                if st.button("Inizia Smart Random", type="primary"):
+                    # Calcola la percentuale di errore per ordinare
+                    def error_rate(c):
+                        tot = c.get('correctCount', 0) + c.get('incorrectCount', 0)
+                        return c.get('incorrectCount', 0) / tot if tot > 0 else 0.5 # 0.5 per le parole nuove
+                    
+                    sorted_cards = sorted(st.session_state.flashcards, key=error_rate, reverse=True)
+                    st.session_state.study_cards = sorted_cards[:num_cards]
+                    st.session_state.study_index = 0
+                    st.session_state.card_flipped = False
+                    st.session_state.session_results = {'correct': [], 'incorrect': []}
+                    st.session_state.study_mode = "studying"
                     st.rerun()
             
+            with tab2:
+                st.write("Spunta le singole parole che vuoi ripassare.")
+                with st.form("manual_selection_form"):
+                    selected_ids = []
+                    for c in st.session_state.flashcards:
+                        if st.checkbox(f"{c['german']} ({c['italian']})", key=f"chk_{c['id']}"):
+                            selected_ids.append(c['id'])
+                    
+                    if st.form_submit_button("Inizia Selezione Manuale"):
+                        if not selected_ids:
+                            st.warning("Seleziona almeno una parola!")
+                        else:
+                            st.session_state.study_cards = [c for c in st.session_state.flashcards if c['id'] in selected_ids]
+                            random.shuffle(st.session_state.study_cards)
+                            st.session_state.study_index = 0
+                            st.session_state.card_flipped = False
+                            st.session_state.session_results = {'correct': [], 'incorrect': []}
+                            st.session_state.study_mode = "studying"
+                            st.rerun()
+
+        # FASE 2: STUDIO ATTIVO
+        elif st.session_state.study_mode == "studying":
+            if st.session_state.study_index < len(st.session_state.study_cards):
+                card = st.session_state.study_cards[st.session_state.study_index]
+                
+                st.progress((st.session_state.study_index) / len(st.session_state.study_cards))
+                st.caption(f"Carta {st.session_state.study_index + 1} di {len(st.session_state.study_cards)}")
+                
+                if not st.session_state.card_flipped:
+                    # FRONTE
+                    st.markdown(f"""
+                    <div class="flashcard">
+                        <div class="fc-category">{card.get('category', '')}</div>
+                        <div class="fc-german">{card.get('article', '')} {card.get('german', '')}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    if st.button("🔄 Gira la carta"):
+                        st.session_state.card_flipped = True
+                        st.rerun()
+                else:
+                    # RETRO
+                    ex_de = card.get('exampleSentenceGerman', '')
+                    ex_it = card.get('exampleSentenceItalian', '')
+                    example_html = f'<div class="fc-example">🇩🇪 {ex_de}<br><br>🇮🇹 <span style="opacity:0.8;">{ex_it}</span></div>' if ex_de else ''
+                    
+                    st.markdown(f"""
+                    <div class="flashcard">
+                        <div class="fc-category">{card.get('category', '')}</div>
+                        <div class="fc-german">{card.get('article', '')} {card.get('german', '')}</div>
+                        <div class="fc-italian">🇮🇹 {card.get('italian', '')}</div>
+                        {example_html}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    # Trova indice nel DB principale per aggiornare le statistiche globali
+                    db_idx = next((i for i, c in enumerate(st.session_state.flashcards) if c['id'] == card['id']), -1)
+                    
+                    with col1:
+                        if st.button("❌ No, non la so"):
+                            if db_idx != -1:
+                                st.session_state.flashcards[db_idx]['incorrectCount'] = int(st.session_state.flashcards[db_idx].get('incorrectCount', 0)) + 1
+                                save_data(st.session_state.flashcards)
+                            st.session_state.session_results['incorrect'].append(card)
+                            st.session_state.study_index += 1
+                            st.session_state.card_flipped = False
+                            st.rerun()
+                            
+                    with col2:
+                        if st.button("✅ Sì, la so"):
+                            if db_idx != -1:
+                                st.session_state.flashcards[db_idx]['correctCount'] = int(st.session_state.flashcards[db_idx].get('correctCount', 0)) + 1
+                                save_data(st.session_state.flashcards)
+                            st.session_state.session_results['correct'].append(card)
+                            st.session_state.study_index += 1
+                            st.session_state.card_flipped = False
+                            st.rerun()
             else:
-                # RETRO
-                plural_html = f'<div class="fc-details"><b>Plurale:</b> {plural}</div>' if plural else ''
-                example_html = f'<div class="fc-example">🇩🇪 {ex_de}<br><br>🇮🇹 <span style="opacity:0.8;">{ex_it}</span></div>' if ex_de else ''
-                
-                card_html = f"""
-                <div class="flashcard">
-                    <div class="fc-category">{category}</div>
-                    <div class="fc-german">{article} {german}</div>
-                    <div class="fc-italian">🇮🇹 {italian}</div>
-                    {plural_html}
-                    {example_html}
-                </div>
-                """
-                st.markdown(card_html, unsafe_allow_html=True)
-                
-                # Bottoni Giganti Verde e Rosso
-                col1, col2 = st.columns(2)
-                
-                try:
-                    original_index = st.session_state.flashcards.index(card)
-                except ValueError:
-                    original_index = -1
-                
-                with col1:
-                    if st.button("❌ Non la so"):
-                        if original_index != -1:
-                            st.session_state.flashcards[original_index]['incorrectCount'] = int(st.session_state.flashcards[original_index].get('incorrectCount', 0)) + 1
-                            save_data(st.session_state.flashcards)
-                        st.session_state.study_index += 1
-                        st.session_state.card_flipped = False
-                        st.rerun()
-                        
-                with col2:
-                    if st.button("✅ La so"):
-                        if original_index != -1:
-                            st.session_state.flashcards[original_index]['correctCount'] = int(st.session_state.flashcards[original_index].get('correctCount', 0)) + 1
-                            save_data(st.session_state.flashcards)
-                        st.session_state.study_index += 1
-                        st.session_state.card_flipped = False
-                        st.rerun()
-                
-        else:
+                # Fine carte, passa al riepilogo
+                st.session_state.study_mode = "summary"
+                st.rerun()
+
+        # FASE 3: RIEPILOGO E CICLO DI FINE STUDIO
+        elif st.session_state.study_mode == "summary":
             st.balloons()
-            st.success("🎉 Hai completato la sessione di studio!")
-            if st.button("🔄 Inizia una nuova sessione"):
-                del st.session_state.study_index
-                st.session_state.card_flipped = False
+            st.markdown("<h2 style='text-align: center;'>Sessione Completata! 🎉</h2>", unsafe_allow_html=True)
+            
+            corrette = len(st.session_state.session_results['correct'])
+            sbagliate = len(st.session_state.session_results['incorrect'])
+            
+            col1, col2 = st.columns(2)
+            col1.metric("✅ Corrette", corrette)
+            col2.metric("❌ Da ripassare", sbagliate)
+            
+            st.markdown("---")
+            
+            if sbagliate > 0:
+                if st.button("🔄 Ripeti solo quelle che non sapevo"):
+                    st.session_state.study_cards = st.session_state.session_results['incorrect']
+                    random.shuffle(st.session_state.study_cards)
+                    st.session_state.study_index = 0
+                    st.session_state.card_flipped = False
+                    st.session_state.session_results = {'correct': [], 'incorrect': []}
+                    st.session_state.study_mode = "studying"
+                    st.rerun()
+            
+            if st.button("🏠 Esci e torna alla Dashboard"):
+                st.session_state.study_mode = "setup"
                 st.rerun()
