@@ -41,7 +41,7 @@ with st.sidebar:
     menu = st.radio("Navigazione", ["Dashboard", "Genera Flashcard", "Smart Reader", "Studio"])
 
 def get_model():
-    return genai.GenerativeModel(model_name="gemini-1.5-flash", generation_config={"fallback_to_older_models": True})
+    return genai.GenerativeModel(model_name="gemini-1.5-flash")
 
 # --- 4. DASHBOARD ---
 if menu == "Dashboard":
