@@ -1,24 +1,21 @@
 import streamlit as st
 import pandas as pd
-import random
+import os
+import json
+import google.generativeai as genai
 
 # --- 1. CONFIGURAZIONE PAGINA E DESIGN ---
-# Impostiamo il layout largo e il titolo dell'app
 st.set_page_config(page_title="SprachMaster: Deutsch-Italienisch", layout="wide", initial_sidebar_state="expanded")
 
-# Inseriamo il CSS personalizzato per rispettare le tue regole di design
-# - Font: Times New Roman
-# - Colori: Blu primario
-# - Bottoni: Grandi e facili da cliccare (Mobile-First)
-# - Nessuna emoji
+# CSS Personalizzato: Times New Roman, Colori Professionali, Mobile-First, Nessuna Emoji
 st.markdown("""
 <style>
-    /* Tipografia: Forza l'uso del Times New Roman ovunque */
+    /* Tipografia: Times New Roman ovunque */
     html, body, [class*="css"], p, h1, h2, h3, h4, h5, h6, span, div, button, input, select, textarea {
         font-family: 'Times New Roman', Times, serif !important;
     }
     
-    /* Stile Bottoni Mobile-First: grandi, arrotondati e facili da cliccare */
+    /* Stile Bottoni Mobile-First */
     .stButton>button {
         border-radius: 8px !important;
         font-weight: bold !important;
@@ -28,27 +25,27 @@ st.markdown("""
         border: 1px solid #0055ff !important;
     }
     
-    /* Colore Primario: Blu per i bottoni principali */
+    /* Colore Primario: Blu */
     button[kind="primary"] {
         background-color: #0055ff !important;
         color: white !important;
     }
     
-    /* Pulsante Rosso per gli errori ("Non la so") */
+    /* Pulsante Rosso (Non la so) */
     button:has(div:contains("Non la so")) {
         background-color: #ff4b4b !important;
         border-color: #ff4b4b !important;
         color: white !important;
     }
     
-    /* Pulsante Verde per i successi ("La so") */
+    /* Pulsante Verde (La so) */
     button:has(div:contains("La so")) {
         background-color: #4caf50 !important;
         border-color: #4caf50 !important;
         color: white !important;
     }
     
-    /* Stile Card per i contenitori: bordi arrotondati e ombra leggera */
+    /* Stile Card */
     div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column;"] {
         background-color: rgba(0, 85, 255, 0.05);
         border-radius: 10px;
@@ -56,282 +53,246 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     
-    /* Classe per centrare i testi principali nelle flashcard */
+    /* Centrare i testi */
     .centered-text {
         text-align: center;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. GESTIONE DATABASE (SIMULAZIONE LOCALE) ---
-# Invece di usare un file CSV che potrebbe dare errori, usiamo la memoria temporanea di Streamlit (session_state)
-if 'db' not in st.session_state:
-    # Creiamo un database iniziale con alcune parole predefinite per farti provare subito l'app
-    dati_iniziali = [
-        {"Termine_con_Articolo": "die Katze", "Plurale": "die Katzen", "Traduzione": "il gatto", "Categoria": "Sostantivo", "Esempio": "Die Katze schläft.", "Errori": 0, "Successi": 0, "Selezionata": False},
-        {"Termine_con_Articolo": "der Hund", "Plurale": "die Hunde", "Traduzione": "il cane", "Categoria": "Sostantivo", "Esempio": "Der Hund bellt.", "Errori": 0, "Successi": 0, "Selezionata": False},
-        {"Termine_con_Articolo": "das Haus", "Plurale": "die Häuser", "Traduzione": "la casa", "Categoria": "Sostantivo", "Esempio": "Das Haus ist groß.", "Errori": 0, "Successi": 0, "Selezionata": False},
-        {"Termine_con_Articolo": "lernen", "Plurale": "", "Traduzione": "imparare", "Categoria": "Verbo", "Esempio": "Ich lerne Deutsch.", "Errori": 0, "Successi": 0, "Selezionata": False}
-    ]
-    st.session_state['db'] = pd.DataFrame(dati_iniziali)
+# --- 2. GESTIONE DATABASE (CSV) ---
+CSV_FILE = "flashcards.csv"
+COLUMNS = ["Termine", "Articolo_Plurale", "Traduzione", "Categoria", "Esempio", "Errori", "Successi", "Selezionata"]
 
-# --- 3. NAVIGAZIONE LATERALE ---
+def load_data():
+    if not os.path.exists(CSV_FILE):
+        df = pd.DataFrame(columns=COLUMNS)
+        df.to_csv(CSV_FILE, index=False)
+        return df
+    return pd.read_csv(CSV_FILE)
+
+def save_data(df):
+    df.to_csv(CSV_FILE, index=False)
+
+# --- 3. GESTIONE API KEY E NAVIGAZIONE ---
 with st.sidebar:
-    st.header("Menu di Navigazione")
-    menu = ["Dashboard", "Aggiungi Parole", "Smart Reader", "Studio"]
+    st.header("Impostazioni AI")
+    # Campo per inserire la chiave API come richiesto
+    api_key_input = st.text_input("Inserisci la tua Google API Key", type="password")
+    
+    if api_key_input:
+        genai.configure(api_key=api_key_input)
+        st.success("Chiave API configurata.")
+    else:
+        st.warning("Inserisci la chiave nella barra laterale per attivare l'IA.")
+        
+    st.markdown("---")
+    st.header("Navigazione")
+    menu = ["Dashboard", "Genera Flashcard", "Smart Reader", "Studio"]
     choice = st.radio("Seleziona Sezione", menu)
+
+# --- FUNZIONE HELPER PER IL MODELLO AI ---
+def get_ai_model():
+    """Restituisce il modello configurato esattamente come richiesto per evitare l'errore 404."""
+    return genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        generation_config={"fallback_to_older_models": True}
+    )
 
 # --- 4. SEZIONE: DASHBOARD ---
 if choice == "Dashboard":
     st.title("Dashboard Flashcard")
-    st.write("Qui puoi visualizzare e gestire il tuo vocabolario.")
-    
-    df = st.session_state['db']
+    df = load_data()
     
     if df.empty:
-        st.info("Nessuna flashcard presente. Vai alla sezione 'Aggiungi Parole' per inserirne di nuove.")
+        st.info("Nessuna flashcard presente. Vai alla sezione 'Genera Flashcard' per aggiungerne.")
     else:
-        # Tabella interattiva per visualizzare e selezionare le parole
-        st.subheader("Catalogo Flashcard")
+        # Barra Filtro
+        st.subheader("Filtra e Seleziona")
+        categories = ["Tutte"] + sorted(df["Categoria"].dropna().unique().tolist())
+        selected_category = st.radio("Filtra per Categoria", categories, horizontal=True)
         
-        # Mostriamo la tabella permettendo di modificare solo la colonna "Selezionata"
+        if selected_category != "Tutte":
+            mask = df["Categoria"] == selected_category
+        else:
+            mask = pd.Series(True, index=df.index)
+            
+        col_sel1, col_sel2 = st.columns(2)
+        with col_sel1:
+            if st.button("Seleziona tutto il filtrato", type="primary"):
+                df.loc[mask, "Selezionata"] = True
+                save_data(df)
+                st.rerun()
+        with col_sel2:
+            if st.button("Deseleziona tutto il filtrato"):
+                df.loc[mask, "Selezionata"] = False
+                save_data(df)
+                st.rerun()
+                
+        # Tabella di Controllo Manuale
+        st.subheader("Catalogo Flashcard")
         edited_df = st.data_editor(
-            df,
+            df[mask],
             column_config={
-                "Selezionata": st.column_config.CheckboxColumn("Selezionata", help="Seleziona per lo studio manuale"),
+                "Selezionata": st.column_config.CheckboxColumn("Selezionata"),
             },
-            disabled=["Termine_con_Articolo", "Plurale", "Traduzione", "Categoria", "Esempio", "Errori", "Successi"],
+            disabled=["Termine", "Articolo_Plurale", "Traduzione", "Categoria", "Esempio", "Errori", "Successi"],
             hide_index=True,
             use_container_width=True,
             key="data_editor"
         )
         
-        # Salviamo le modifiche fatte alle checkbox nella memoria
-        st.session_state['db'] = edited_df
+        if not edited_df.equals(df[mask]):
+            df.loc[mask, "Selezionata"] = edited_df["Selezionata"].values
+            save_data(df)
+            
+        # Modifica e Eliminazione Singola (Nessun tasto "Elimina tutto")
+        st.markdown("---")
+        st.subheader("Azioni Manuali")
+        col_act1, col_act2 = st.columns(2)
+        with col_act1:
+            word_to_edit = st.selectbox("Parola da modificare", df[mask]["Termine"].tolist(), key="edit_select")
+            if st.button("[Modifica] Apri modulo"):
+                st.session_state['edit_word'] = word_to_edit
+                st.rerun()
+        with col_act2:
+            word_to_delete = st.selectbox("Parola da eliminare", df[mask]["Termine"].tolist(), key="del_select")
+            if st.button("[Elimina] Rimuovi singola parola"):
+                df = df[df["Termine"] != word_to_delete]
+                save_data(df)
+                st.success("Parola eliminata con successo.")
+                st.rerun()
+                
+        # Modulo di Modifica
+        if 'edit_word' in st.session_state and st.session_state['edit_word']:
+            st.markdown("### Modulo Modifica")
+            word = st.session_state['edit_word']
+            if word in df["Termine"].values:
+                row = df[df["Termine"] == word].iloc[0]
+                with st.form("edit_form"):
+                    new_termine = st.text_input("Termine", row["Termine"])
+                    new_art_plur = st.text_input("Articolo e Plurale", row["Articolo_Plurale"])
+                    new_trad = st.text_input("Traduzione", row["Traduzione"])
+                    new_cat = st.text_input("Categoria", row["Categoria"])
+                    new_es = st.text_area("Esempio", row["Esempio"])
+                    if st.form_submit_button("Salva Modifiche"):
+                        idx = df[df["Termine"] == word].index[0]
+                        df.at[idx, "Termine"] = new_termine
+                        df.at[idx, "Articolo_Plurale"] = new_art_plur
+                        df.at[idx, "Traduzione"] = new_trad
+                        df.at[idx, "Categoria"] = new_cat
+                        df.at[idx, "Esempio"] = new_es
+                        save_data(df)
+                        st.session_state['edit_word'] = None
+                        st.success("Modifiche salvate!")
+                        st.rerun()
 
-# --- 5. SEZIONE: AGGIUNGI PAROLE (SIMULAZIONE AI) ---
-elif choice == "Aggiungi Parole":
-    st.title("Genera Flashcard (Simulazione AI)")
-    st.write("Incolla una lista di parole (una per riga). Il sistema simulerà l'intelligenza artificiale per completare i dati.")
+# --- 5. SEZIONE: GENERA FLASHCARD ---
+elif choice == "Genera Flashcard":
+    st.title("Genera Flashcard con AI")
+    st.write("Incolla una lista di parole (una per riga). L'AI completerà automaticamente i dati.")
     
-    # Database finto per simulare le risposte dell'AI senza usare internet o API key
-    simulazione_ai_db = {
-        "katze": {"Termine_con_Articolo": "die Katze", "Plurale": "die Katzen", "Traduzione": "il gatto", "Categoria": "Sostantivo", "Esempio": "Die Katze trinkt Milch."},
-        "hund": {"Termine_con_Articolo": "der Hund", "Plurale": "die Hunde", "Traduzione": "il cane", "Categoria": "Sostantivo", "Esempio": "Der Hund spielt im Garten."},
-        "flughafen": {"Termine_con_Articolo": "der Flughafen", "Plurale": "die Flughäfen", "Traduzione": "l'aeroporto", "Categoria": "Sostantivo", "Esempio": "Wir fahren zum Flughafen."},
-        "apfel": {"Termine_con_Articolo": "der Apfel", "Plurale": "die Äpfel", "Traduzione": "la mela", "Categoria": "Sostantivo", "Esempio": "Ich esse einen Apfel."},
-        "gehen": {"Termine_con_Articolo": "gehen", "Plurale": "", "Traduzione": "andare", "Categoria": "Verbo", "Esempio": "Wir gehen nach Hause."}
-    }
-    
-    words_input = st.text_area("Lista parole (es. katze, flughafen, apfel, gehen)", height=150)
+    words_input = st.text_area("Lista parole", height=200)
     
     if st.button("Genera Flashcard", type="primary"):
-        if not words_input.strip():
+        if not api_key_input:
+            st.error("Inserisci la API Key nella barra laterale per procedere.")
+        elif not words_input.strip():
             st.warning("Inserisci almeno una parola.")
         else:
-            # Dividiamo il testo inserito in una lista di parole
-            words_list = [w.strip().lower() for w in words_input.split('\n') if w.strip()]
-            nuove_righe = []
+            words_list = [w.strip() for w in words_input.split('\n') if w.strip()]
             
-            for word in words_list:
-                if word in simulazione_ai_db:
-                    # Se la parola è nel nostro finto database AI, la completiamo in automatico
-                    dati_parola = simulazione_ai_db[word]
-                    dati_parola["Errori"] = 0
-                    dati_parola["Successi"] = 0
-                    dati_parola["Selezionata"] = False
-                    nuove_righe.append(dati_parola)
-                    st.success(f"Parola '{word}' elaborata con successo!")
-                else:
-                    # Se non c'è, la aggiungiamo vuota e avvisiamo l'utente
-                    nuova_parola_vuota = {
-                        "Termine_con_Articolo": word, "Plurale": "", "Traduzione": "", 
-                        "Categoria": "", "Esempio": "", "Errori": 0, "Successi": 0, "Selezionata": False
-                    }
-                    nuove_righe.append(nuova_parola_vuota)
-                    st.warning(f"Parola '{word}' non trovata nel database di simulazione. Verrà aggiunta con campi vuoti da compilare manualmente.")
+            prompt = f"""
+            Analizza la seguente lista di parole in tedesco o italiano:
+            {words_list}
             
-            # Aggiungiamo le nuove parole al database in memoria
-            if nuove_righe:
-                nuovo_df = pd.DataFrame(nuove_righe)
-                st.session_state['db'] = pd.concat([st.session_state['db'], nuovo_df], ignore_index=True)
-                st.info("Parole aggiunte al database! Vai alla Dashboard per vederle.")
+            Per ogni parola, fornisci un output JSON strutturato come una lista di oggetti con le seguenti chiavi esatte:
+            - "Termine": La parola originale in tedesco.
+            - "Articolo_Plurale": L'articolo determinativo e la forma plurale (solo se è un sostantivo, altrimenti stringa vuota).
+            - "Traduzione": La traduzione in italiano.
+            - "Categoria": La classificazione grammaticale (es. Verbo, Sostantivo, Aggettivo).
+            - "Esempio": Una frase d'esempio naturale in tedesco.
+            
+            Restituisci SOLO codice JSON valido, senza formattazione markdown aggiuntiva.
+            """
+            
+            with st.spinner("Generazione in corso..."):
+                try:
+                    model = get_ai_model()
+                    response = model.generate_content(prompt)
+                    
+                    text = response.text.strip()
+                    if text.startswith("```json"):
+                        text = text[7:-3]
+                    elif text.startswith("```"):
+                        text = text[3:-3]
+                        
+                    data = json.loads(text.strip())
+                    st.session_state['generated_cards'] = data
+                    st.success("Generazione completata! Rivedi i risultati qui sotto.")
+                except Exception as e:
+                    st.error("Si è verificato un errore di rete o di configurazione con l'Intelligenza Artificiale. Verifica che la tua API Key sia corretta, che non ci siano spazi vuoti accidentali e di avere una connessione internet stabile. Riprova tra qualche istante.")
 
-# --- 6. SEZIONE: SMART READER (SIMULAZIONE) ---
+    if 'generated_cards' in st.session_state:
+        st.subheader("Revisione Risultati")
+        gen_df = pd.DataFrame(st.session_state['generated_cards'])
+        edited_gen_df = st.data_editor(gen_df, use_container_width=True)
+        
+        if st.button("Salva nel Database", type="primary"):
+            df = load_data()
+            edited_gen_df["Errori"] = 0
+            edited_gen_df["Successi"] = 0
+            edited_gen_df["Selezionata"] = False
+            
+            df = pd.concat([df, edited_gen_df], ignore_index=True)
+            save_data(df)
+            del st.session_state['generated_cards']
+            st.success("Flashcard salvate con successo!")
+
+# --- 6. SEZIONE: SMART READER ---
 elif choice == "Smart Reader":
-    st.title("Smart Reader (Simulazione)")
-    st.write("Leggi testi adattati al tuo livello e scopri nuove parole.")
+    st.title("Smart Reader")
+    st.write("Genera testi personalizzati basati sul tuo vocabolario.")
     
     col1, col2 = st.columns(2)
     with col1:
         level = st.selectbox("Livello di difficoltà", ["A1", "A2", "B1", "B2"])
     with col2:
-        theme = st.text_input("Tema della lettura (es. un dialogo in aeroporto)")
+        theme = st.text_input("Tema della lettura (es. in aeroporto)")
         
-    if st.button("Genera Testo Simulato", type="primary"):
-        if not theme:
-            st.warning("Inserisci un tema per generare il testo.")
+    if st.button("Genera Testo", type="primary"):
+        if not api_key_input:
+            st.error("Inserisci la API Key nella barra laterale per procedere.")
+        elif not theme:
+            st.warning("Inserisci un tema.")
         else:
-            # Testo finto per simulare la generazione
-            testo_simulato = f"""
-            Guten Tag! Willkommen am Flughafen. 
-            Wo ist der Hund? Der Hund ist hier. 
-            Die Katze ist nicht am Flughafen. 
-            Wir gehen zum Flugzeug. Das Haus ist weit weg.
-            """
-            st.session_state['reader_text'] = testo_simulato
-            st.success("Testo generato con successo!")
+            df = load_data()
+            vocab = df["Termine"].tolist()
+            vocab_str = ", ".join(vocab[:50]) 
             
+            prompt = f"""
+            Scrivi un testo in tedesco di livello {level} sul tema: "{theme}".
+            Cerca di utilizzare il più possibile le seguenti parole (se pertinenti al tema): {vocab_str}.
+            Il testo deve essere naturale e grammaticalmente corretto.
+            Restituisci solo il testo in tedesco, senza introduzioni.
+            """
+            
+            with st.spinner("Generazione testo in corso..."):
+                try:
+                    model = get_ai_model()
+                    response = model.generate_content(prompt)
+                    st.session_state['reader_text'] = response.text
+                except Exception as e:
+                    st.error("Impossibile generare il testo. Verifica la tua API Key e la connessione internet, quindi riprova.")
+                    
     if 'reader_text' in st.session_state:
         st.markdown("### Testo Generato")
         st.info(st.session_state['reader_text'])
         
         st.markdown("---")
         st.subheader("Traduzione Contestuale")
-        st.write("Inserisci una parola dal testo per vederne la traduzione:")
-        
-        # Simuliamo il click su una parola usando un campo di testo
-        word_to_translate = st.text_input("Parola da tradurre (es. Flughafen, Hund, Katze):")
-        
-        # Dizionario finto per le traduzioni del testo
-        dizionario_testo = {
-            "flughafen": "aeroporto",
-            "hund": "cane",
-            "katze": "gatto",
-            "haus": "casa",
-            "gehen": "andare",
-            "flugzeug": "aeroplano",
-            "willkommen": "benvenuto"
-        }
-        
-        if st.button("Traduci"):
-            parola_pulita = word_to_translate.strip().lower()
-            if parola_pulita in dizionario_testo:
-                st.success(f"Traduzione di '{word_to_translate}': **{dizionario_testo[parola_pulita]}**")
-            elif parola_pulita:
-                st.warning("Traduzione non disponibile nella simulazione per questa parola.")
-
-# --- 7. SEZIONE: STUDIO E ALGORITMO ---
-elif choice == "Studio":
-    st.title("Modalità Studio")
-    df = st.session_state['db']
-    
-    # Se non c'è una sessione di studio attiva, mostriamo le opzioni per iniziarne una
-    if 'study_queue' not in st.session_state:
-        st.write("Configura la tua sessione di ripasso.")
-        
-        session_type = st.radio("Seleziona le parole da studiare:", 
-                                ["Solo flashcard selezionate manualmente", "Smart Random (Scelta automatica)"])
-        
-        num_words = 10
-        if session_type == "Smart Random (Scelta automatica)":
-            num_words = st.number_input("Quante parole vuoi ripassare?", min_value=1, max_value=100, value=5)
-            
-        if st.button("Inizia Sessione", type="primary"):
-            if session_type == "Solo flashcard selezionate manualmente":
-                # Filtriamo solo le righe dove "Selezionata" è True
-                parole_da_studiare = df[df["Selezionata"] == True]
-            else:
-                # Algoritmo Intelligente: diamo più peso (probabilità) alle parole con più errori
-                pesi = df["Errori"] + 1 
-                numero_reale = min(num_words, len(df))
-                parole_da_studiare = df.sample(n=numero_reale, weights=pesi)
-                
-            if parole_da_studiare.empty:
-                st.warning("Nessuna parola trovata. Vai nella Dashboard per selezionare delle parole o aggiungerne di nuove.")
-            else:
-                # Salviamo le parole da studiare e azzeriamo i contatori della sessione
-                st.session_state['study_queue'] = parole_da_studiare.to_dict('records')
-                st.session_state['current_index'] = 0
-                st.session_state['session_errors'] = []
-                st.session_state['show_translation'] = False
-                st.rerun()
-
-    # Se c'è una sessione di studio attiva
-    else:
-        coda_studio = st.session_state['study_queue']
-        indice_corrente = st.session_state['current_index']
-        
-        # Se ci sono ancora carte da mostrare
-        if indice_corrente < len(coda_studio):
-            carta_corrente = coda_studio[indice_corrente]
-            
-            st.write(f"Carta {indice_corrente + 1} di {len(coda_studio)}")
-            st.markdown("---")
-            
-            # Mostriamo il termine in tedesco
-            st.markdown(f"<h1 class='centered-text'>{carta_corrente['Termine_con_Articolo']}</h1>", unsafe_allow_html=True)
-            if carta_corrente['Plurale']:
-                st.markdown(f"<h3 class='centered-text'><i>{carta_corrente['Plurale']}</i></h3>", unsafe_allow_html=True)
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            # Bottone per mostrare la traduzione
-            if not st.session_state['show_translation']:
-                if st.button("Mostra Traduzione"):
-                    st.session_state['show_translation'] = True
-                    st.rerun()
-            
-            # Se la traduzione è visibile, mostriamo i dettagli e i bottoni di swipe
-            if st.session_state['show_translation']:
-                st.markdown(f"<h2 class='centered-text' style='color: #0055ff;'>{carta_corrente['Traduzione']}</h2>", unsafe_allow_html=True)
-                if carta_corrente['Esempio']:
-                    st.markdown(f"<p class='centered-text'>Esempio: {carta_corrente['Esempio']}</p>", unsafe_allow_html=True)
-                
-                st.markdown("<br>", unsafe_allow_html=True)
-                
-                # Bottoni che simulano lo swipe (Rosso e Verde)
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("Non la so"):
-                        # Registriamo l'errore nel database principale
-                        idx_db = df.index[df['Termine_con_Articolo'] == carta_corrente['Termine_con_Articolo']].tolist()[0]
-                        st.session_state['db'].at[idx_db, 'Errori'] += 1
-                        
-                        # Salviamo la carta negli errori della sessione per poterla ripetere alla fine
-                        st.session_state['session_errors'].append(carta_corrente)
-                        
-                        # Passiamo alla carta successiva
-                        st.session_state['current_index'] += 1
-                        st.session_state['show_translation'] = False
-                        st.rerun()
-                with col2:
-                    if st.button("La so"):
-                        # Registriamo il successo nel database principale
-                        idx_db = df.index[df['Termine_con_Articolo'] == carta_corrente['Termine_con_Articolo']].tolist()[0]
-                        st.session_state['db'].at[idx_db, 'Successi'] += 1
-                        
-                        # Passiamo alla carta successiva
-                        st.session_state['current_index'] += 1
-                        st.session_state['show_translation'] = False
-                        st.rerun()
-                        
-        # Se abbiamo finito tutte le carte
-        else:
-            st.success("Sessione completata!")
-            st.write(f"Parole studiate: {len(coda_studio)}")
-            st.write(f"Errori commessi: {len(st.session_state['session_errors'])}")
-            
-            st.markdown("---")
-            col_fine1, col_fine2 = st.columns(2)
-            
-            with col_fine1:
-                if st.button("Ripeti solo le parole sbagliate", type="primary"):
-                    if len(st.session_state['session_errors']) > 0:
-                        # Facciamo ripartire la sessione solo con gli errori
-                        st.session_state['study_queue'] = st.session_state['session_errors']
-                        st.session_state['current_index'] = 0
-                        st.session_state['session_errors'] = []
-                        st.session_state['show_translation'] = False
-                        st.rerun()
-                    else:
-                        st.info("Bravissimo! Non hai fatto nessun errore.")
-                        
-            with col_fine2:
-                if st.button("Termina e chiudi sessione"):
-                    # Cancelliamo i dati della sessione per tornare alla schermata iniziale dello Studio
-                    del st.session_state['study_queue']
-                    del st.session_state['current_index']
-                    del st.session_state['session_errors']
-                    del st.session_state['show_translation']
-                    st.rerun()
+        word_to_translate = st.text_input("Inserisci una parola dal testo che non conosci:")
+        if st.button("Traduci e Spiega"):
+            if word_to_translate:
+                prompt_trans = f"""
+                Traduci la parola tedesca "{word_to_translate}" in italiano.
