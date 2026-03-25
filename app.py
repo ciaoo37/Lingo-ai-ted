@@ -111,7 +111,7 @@ elif menu == "Genera Flashcard":
                     st.session_state['gen'] = json.loads(resp.strip())
                     st.success("Fatto!")
                 except Exception as e:
-                    st.error("Errore di rete o API. Verifica la chiave e riprova.")
+                    st.error(f"Errore API Google: {str(e)}")
     if 'gen' in st.session_state:
         gdf = st.data_editor(pd.DataFrame(st.session_state['gen']), use_container_width=True)
         if st.button("Salva nel Database", type="primary"):
@@ -137,7 +137,7 @@ elif menu == "Smart Reader":
                 try:
                     st.session_state['txt'] = get_model().generate_content(prompt).text
                 except Exception as e:
-                    st.error("Errore AI. Verifica la chiave e riprova.")
+                    st.error(f"Errore API Google: {str(e)}")
     if 'txt' in st.session_state:
         st.info(st.session_state['txt'])
         w = st.text_input("Parola da tradurre:")
@@ -148,7 +148,7 @@ elif menu == "Smart Reader":
                 try:
                     st.success(get_model().generate_content(f"Traduci in italiano e spiega '{w}' nel livello {lvl}.").text)
                 except Exception as e:
-                    st.error("Errore traduzione.")
+                    st.error(f"Errore traduzione API Google: {str(e)}")
 
 # --- 7. STUDIO ---
 elif menu == "Studio":
@@ -198,7 +198,7 @@ elif menu == "Studio":
                         if f"clz_{i}" not in st.session_state:
                             try:
                                 st.session_state[f"clz_{i}"] = get_model().generate_content(f"Crea frase tedesca con '___' per la parola '{row['Termine']}' e traduzione italiana. Solo testo.").text
-                            except: st.session_state[f"clz_{i}"] = "Errore AI."
+                            except Exception as e: st.session_state[f"clz_{i}"] = f"Errore AI: {str(e)}"
                         st.info(st.session_state[f"clz_{i}"])
                         ans = st.text_input("Parola mancante:", key=f"a_{i}")
                         if st.button("Verifica", type="primary"):
@@ -219,7 +219,7 @@ elif menu == "Studio":
                         if f"vrb_{i}" not in st.session_state:
                             try:
                                 st.session_state[f"vrb_{i}"] = get_model().generate_content(f"Chiedi di coniugare '{row['Termine']}' al {st.session_state['tns']} per una persona a caso. Solo la richiesta.").text
-                            except: st.session_state[f"vrb_{i}"] = "Errore AI."
+                            except Exception as e: st.session_state[f"vrb_{i}"] = f"Errore AI: {str(e)}"
                         st.info(st.session_state[f"vrb_{i}"])
                         ans = st.text_input("Coniugazione:", key=f"va_{i}")
                         if st.button("Verifica", type="primary"):
@@ -228,7 +228,7 @@ elif menu == "Studio":
                                 if "SI" in chk.upper(): st.success("Corretto!"); df.loc[df["Termine"]==row["Termine"], "Successi"] += 1
                                 else: st.error("Sbagliato."); df.loc[df["Termine"]==row["Termine"], "Errori"] += 1; st.session_state['errs'].append(row["Termine"])
                                 save_db(df); st.session_state[f"vchk_{i}"] = True
-                            except: st.error("Errore AI.")
+                            except Exception as e: st.error(f"Errore AI: {str(e)}")
                         if st.session_state.get(f"vchk_{i}"):
                             if st.button("Prossima"): st.session_state['idx'] += 1; st.rerun()
             else:
